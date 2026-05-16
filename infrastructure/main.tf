@@ -252,9 +252,8 @@ resource "aws_db_instance" "catalogue" {
   username = "catalogue_user"
   password = "cataloguedb123"
 
-  db_subnet_group_name   = aws_db_subnet_group.main.name
-  vpc_security_group_ids = [aws_security_group.rds.id]
-
+  db_subnet_group_name    = aws_db_subnet_group.main.name
+  vpc_security_group_ids  = [aws_security_group.rds.id]
   publicly_accessible     = false
   multi_az                = false
   skip_final_snapshot     = true
@@ -314,7 +313,6 @@ resource "aws_security_group" "eks_cluster" {
   }
 }
 
-# EKS Cluster
 resource "aws_eks_cluster" "main" {
   name     = "sock-shop-cluster"
   version  = "1.30"
@@ -342,20 +340,103 @@ resource "aws_eks_cluster" "main" {
   }
 }
 
+resource "aws_iam_role" "eks_nodes" {
+  name = "sock-shop-eks-node-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "ec2.amazonaws.com"
+      }
+    }]
+  })
+
+  tags = {
+    Name        = "sock-shop-eks-node-role"
+    Environment = "production"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "eks_worker_node_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+  role       = aws_iam_role.eks_nodes.name
+}
+
+resource "aws_iam_role_policy_attachment" "eks_cni_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+  role       = aws_iam_role.eks_nodes.name
+}
+
+resource "aws_iam_role_policy_attachment" "eks_container_registry" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+  role       = aws_iam_role.eks_nodes.name
+}
+
+resource "aws_security_group" "eks_nodes" {
+  name        = "sock-shop-eks-nodes-sg"
+  description = "Security group for EKS worker nodes"
+  vpc_id      = aws_vpc.main.id
+  ingress {
+    from_port = 0
+    to_port   = 0
+    protocol  = "-1"
+    self      = true
+  }
+  ingress {
+    from_port       = 1025
+    to_port         = 65535
+    protocol        = "tcp"
+    security_groups = [aws_security_group.eks_cluster.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "sock-shop-eks-nodes-sg"
+    Environment = "production"
+  }
+}
+
+# EKS Node Group — 2x t3.small in private subnets
+resource "aws_eks_node_group" "main" {
+  cluster_name    = aws_eks_cluster.main.name
+  node_group_name = "sock-shop-node-group"
+  node_role_arn   = aws_iam_role.eks_nodes.arn
+  subnet_ids      = [aws_subnet.private_1.id, aws_subnet.private_2.id]
+  instance_types  = ["t3.small"]
+
+  scaling_config {
+    desired_size = 2
+    min_size     = 2
+    max_size     = 4
+  }
+
+  update_config {
+    max_unavailable = 1
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_worker_node_policy,
+    aws_iam_role_policy_attachment.eks_cni_policy,
+    aws_iam_role_policy_attachment.eks_container_registry,
+  ]
+
+  tags = {
+    Name        = "sock-shop-node-group"
+    Environment = "production"
+  }
+}
+
 output "vpc_id" {
   value = aws_vpc.main.id
-}
-
-output "private_subnet_1_id" {
-  value = aws_subnet.private_1.id
-}
-
-output "private_subnet_2_id" {
-  value = aws_subnet.private_2.id
-}
-
-output "nat_gateway_id" {
-  value = aws_nat_gateway.main.id
 }
 
 output "ecr_repository_urls" {
@@ -375,6 +456,6 @@ output "eks_cluster_endpoint" {
 }
 
 output "configure_kubectl" {
-  description = "Run this command after apply to connect kubectl to your cluster"
+  description = "Run this command to connect kubectl to your cluster"
   value       = "aws eks update-kubeconfig --region ap-south-1 --name sock-shop-cluster"
 }
