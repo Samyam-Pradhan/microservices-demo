@@ -13,7 +13,6 @@ provider "aws" {
   region = "ap-south-1"
 }
 
-
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_hostnames = true
@@ -127,8 +126,6 @@ resource "aws_route_table_association" "private_2" {
   subnet_id      = aws_subnet.private_2.id
   route_table_id = aws_route_table.private.id
 }
-
-
 resource "aws_eip" "nat" {
   domain = "vpc"
 
@@ -152,11 +149,60 @@ resource "aws_nat_gateway" "main" {
   depends_on = [aws_internet_gateway.main]
 }
 
-
 resource "aws_route" "private_nat" {
   route_table_id         = aws_route_table.private.id
   destination_cidr_block = "0.0.0.0/0"
   nat_gateway_id         = aws_nat_gateway.main.id
+}
+
+locals {
+  services = [
+    "front-end",
+    "catalogue",
+    "carts",
+    "orders",
+    "shipping",
+    "payment",
+    "user",
+    "queue-master"
+  ]
+}
+
+resource "aws_ecr_repository" "services" {
+  for_each = toset(local.services)
+
+  name                 = "sock-shop/${each.value}"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = {
+    Name        = "sock-shop-${each.value}"
+    Environment = "production"
+  }
+}
+
+# Keep only last 5 images per repo to save storage
+resource "aws_ecr_lifecycle_policy" "services" {
+  for_each   = aws_ecr_repository.services
+  repository = each.value.name
+
+  policy = jsonencode({
+    rules = [{
+      rulePriority = 1
+      description  = "Keep last 5 images"
+      selection = {
+        tagStatus   = "any"
+        countType   = "imageCountMoreThan"
+        countNumber = 5
+      }
+      action = {
+        type = "expire"
+      }
+    }]
+  })
 }
 
 output "vpc_id" {
@@ -179,14 +225,11 @@ output "private_subnet_2_id" {
   value = aws_subnet.private_2.id
 }
 
-output "internet_gateway_id" {
-  value = aws_internet_gateway.main.id
-}
-
 output "nat_gateway_id" {
   value = aws_nat_gateway.main.id
 }
 
-output "nat_gateway_ip" {
-  value = aws_eip.nat.public_ip
+output "ecr_repository_urls" {
+  description = "ECR repository URLs for each service"
+  value       = { for k, v in aws_ecr_repository.services : k => v.repository_url }
 }
