@@ -126,6 +126,7 @@ resource "aws_route_table_association" "private_2" {
   subnet_id      = aws_subnet.private_2.id
   route_table_id = aws_route_table.private.id
 }
+
 resource "aws_eip" "nat" {
   domain = "vpc"
 
@@ -184,7 +185,6 @@ resource "aws_ecr_repository" "services" {
   }
 }
 
-# Keep only last 5 images per repo to save storage
 resource "aws_ecr_lifecycle_policy" "services" {
   for_each   = aws_ecr_repository.services
   repository = each.value.name
@@ -203,6 +203,72 @@ resource "aws_ecr_lifecycle_policy" "services" {
       }
     }]
   })
+}
+
+resource "aws_security_group" "rds" {
+  name        = "sock-shop-rds-sg"
+  description = "Allow MySQL access from within VPC only"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description = "MySQL from VPC"
+    from_port   = 3306
+    to_port     = 3306
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "sock-shop-rds-sg"
+    Environment = "production"
+  }
+}
+
+resource "aws_db_subnet_group" "main" {
+  name       = "sock-shop-db-subnet-group"
+  subnet_ids = [aws_subnet.private_1.id, aws_subnet.private_2.id]
+
+  tags = {
+    Name        = "sock-shop-db-subnet-group"
+    Environment = "production"
+  }
+}
+
+
+resource "aws_db_instance" "catalogue" {
+  identifier        = "sock-shop-catalogue-db"
+  engine            = "mysql"
+  engine_version    = "8.0"
+  instance_class    = "db.t3.micro"
+  allocated_storage = 20
+  storage_type      = "gp2"
+
+  db_name  = "socksdb"
+  username = "catalogue_user"
+  password = "cataloguedb123"
+
+  db_subnet_group_name   = aws_db_subnet_group.main.name
+  vpc_security_group_ids = [aws_security_group.rds.id]
+
+
+  publicly_accessible = false
+  multi_az            = false
+
+  skip_final_snapshot = true
+
+  backup_retention_period = 1
+
+  tags = {
+    Name        = "sock-shop-catalogue-db"
+    Environment = "production"
+  }
 }
 
 output "vpc_id" {
@@ -230,6 +296,14 @@ output "nat_gateway_id" {
 }
 
 output "ecr_repository_urls" {
-  description = "ECR repository URLs for each service"
-  value       = { for k, v in aws_ecr_repository.services : k => v.repository_url }
+  value = { for k, v in aws_ecr_repository.services : k => v.repository_url }
+}
+
+output "rds_endpoint" {
+  description = "RDS endpoint — use this in your catalogue service config"
+  value       = aws_db_instance.catalogue.endpoint
+}
+
+output "rds_db_name" {
+  value = aws_db_instance.catalogue.db_name
 }
