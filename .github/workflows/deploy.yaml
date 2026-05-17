@@ -1,0 +1,141 @@
+name: Deploy to EKS
+
+on:
+  push:
+    branches:
+      - infra
+      - main
+
+env:
+  AWS_REGION: ap-south-1
+  EKS_CLUSTER: sock-shop-cluster
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com
+
+jobs:
+  # -----------------------------------------------
+  # JOB 1 — Pull from DockerHub, push to ECR
+  # -----------------------------------------------
+  push-to-ecr:
+    name: Push Images to ECR
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Pull, retag and push front-end
+        run: |
+          docker pull weaveworksdemos/front-end:0.3.12
+          docker tag weaveworksdemos/front-end:0.3.12 ${{ env.ECR_REGISTRY }}/sock-shop/front-end:${{ github.sha }}
+          docker tag weaveworksdemos/front-end:0.3.12 ${{ env.ECR_REGISTRY }}/sock-shop/front-end:latest
+          docker push ${{ env.ECR_REGISTRY }}/sock-shop/front-end:${{ github.sha }}
+          docker push ${{ env.ECR_REGISTRY }}/sock-shop/front-end:latest
+
+      - name: Pull, retag and push catalogue
+        run: |
+          docker pull weaveworksdemos/catalogue:0.3.5
+          docker tag weaveworksdemos/catalogue:0.3.5 ${{ env.ECR_REGISTRY }}/sock-shop/catalogue:${{ github.sha }}
+          docker tag weaveworksdemos/catalogue:0.3.5 ${{ env.ECR_REGISTRY }}/sock-shop/catalogue:latest
+          docker push ${{ env.ECR_REGISTRY }}/sock-shop/catalogue:${{ github.sha }}
+          docker push ${{ env.ECR_REGISTRY }}/sock-shop/catalogue:latest
+
+      - name: Pull, retag and push carts
+        run: |
+          docker pull weaveworksdemos/carts:0.4.8
+          docker tag weaveworksdemos/carts:0.4.8 ${{ env.ECR_REGISTRY }}/sock-shop/carts:${{ github.sha }}
+          docker tag weaveworksdemos/carts:0.4.8 ${{ env.ECR_REGISTRY }}/sock-shop/carts:latest
+          docker push ${{ env.ECR_REGISTRY }}/sock-shop/carts:${{ github.sha }}
+          docker push ${{ env.ECR_REGISTRY }}/sock-shop/carts:latest
+
+      - name: Pull, retag and push orders
+        run: |
+          docker pull weaveworksdemos/orders:0.4.7
+          docker tag weaveworksdemos/orders:0.4.7 ${{ env.ECR_REGISTRY }}/sock-shop/orders:${{ github.sha }}
+          docker tag weaveworksdemos/orders:0.4.7 ${{ env.ECR_REGISTRY }}/sock-shop/orders:latest
+          docker push ${{ env.ECR_REGISTRY }}/sock-shop/orders:${{ github.sha }}
+          docker push ${{ env.ECR_REGISTRY }}/sock-shop/orders:latest
+
+      - name: Pull, retag and push shipping
+        run: |
+          docker pull weaveworksdemos/shipping:0.4.8
+          docker tag weaveworksdemos/shipping:0.4.8 ${{ env.ECR_REGISTRY }}/sock-shop/shipping:${{ github.sha }}
+          docker tag weaveworksdemos/shipping:0.4.8 ${{ env.ECR_REGISTRY }}/sock-shop/shipping:latest
+          docker push ${{ env.ECR_REGISTRY }}/sock-shop/shipping:${{ github.sha }}
+          docker push ${{ env.ECR_REGISTRY }}/sock-shop/shipping:latest
+
+      - name: Pull, retag and push payment
+        run: |
+          docker pull weaveworksdemos/payment:0.4.3
+          docker tag weaveworksdemos/payment:0.4.3 ${{ env.ECR_REGISTRY }}/sock-shop/payment:${{ github.sha }}
+          docker tag weaveworksdemos/payment:0.4.3 ${{ env.ECR_REGISTRY }}/sock-shop/payment:latest
+          docker push ${{ env.ECR_REGISTRY }}/sock-shop/payment:${{ github.sha }}
+          docker push ${{ env.ECR_REGISTRY }}/sock-shop/payment:latest
+
+      - name: Pull, retag and push user
+        run: |
+          docker pull weaveworksdemos/user:0.4.4
+          docker tag weaveworksdemos/user:0.4.4 ${{ env.ECR_REGISTRY }}/sock-shop/user:${{ github.sha }}
+          docker tag weaveworksdemos/user:0.4.4 ${{ env.ECR_REGISTRY }}/sock-shop/user:latest
+          docker push ${{ env.ECR_REGISTRY }}/sock-shop/user:${{ github.sha }}
+          docker push ${{ env.ECR_REGISTRY }}/sock-shop/user:latest
+
+      - name: Pull, retag and push queue-master
+        run: |
+          docker pull weaveworksdemos/queue-master:0.3.1
+          docker tag weaveworksdemos/queue-master:0.3.1 ${{ env.ECR_REGISTRY }}/sock-shop/queue-master:${{ github.sha }}
+          docker tag weaveworksdemos/queue-master:0.3.1 ${{ env.ECR_REGISTRY }}/sock-shop/queue-master:latest
+          docker push ${{ env.ECR_REGISTRY }}/sock-shop/queue-master:${{ github.sha }}
+          docker push ${{ env.ECR_REGISTRY }}/sock-shop/queue-master:latest
+
+  # -----------------------------------------------
+  # JOB 2 — Deploy updated images to EKS
+  # -----------------------------------------------
+  deploy:
+    name: Deploy to EKS
+    runs-on: ubuntu-latest
+    needs: push-to-ecr
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name ${{ env.EKS_CLUSTER }}
+
+      - name: Deploy all services to EKS
+        run: |
+          kubectl set image deployment/front-end front-end=${{ env.ECR_REGISTRY }}/sock-shop/front-end:${{ github.sha }} -n sock-shop
+          kubectl set image deployment/catalogue catalogue=${{ env.ECR_REGISTRY }}/sock-shop/catalogue:${{ github.sha }} -n sock-shop
+          kubectl set image deployment/carts carts=${{ env.ECR_REGISTRY }}/sock-shop/carts:${{ github.sha }} -n sock-shop
+          kubectl set image deployment/orders orders=${{ env.ECR_REGISTRY }}/sock-shop/orders:${{ github.sha }} -n sock-shop
+          kubectl set image deployment/shipping shipping=${{ env.ECR_REGISTRY }}/sock-shop/shipping:${{ github.sha }} -n sock-shop
+          kubectl set image deployment/payment payment=${{ env.ECR_REGISTRY }}/sock-shop/payment:${{ github.sha }} -n sock-shop
+          kubectl set image deployment/user user=${{ env.ECR_REGISTRY }}/sock-shop/user:${{ github.sha }} -n sock-shop
+          kubectl set image deployment/queue-master queue-master=${{ env.ECR_REGISTRY }}/sock-shop/queue-master:${{ github.sha }} -n sock-shop
+
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/front-end -n sock-shop --timeout=300s
+          kubectl rollout status deployment/catalogue -n sock-shop --timeout=300s
+          kubectl get pods -n sock-shop
