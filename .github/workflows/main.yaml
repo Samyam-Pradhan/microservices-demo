@@ -1,11 +1,7 @@
 name: ci
 
 on:
-  push:
-    branches:
-    - "*"  # run for branches
-    tags:
-    - "*"  # run for tags
+  workflow_dispatch: #edited for my deploy.yml to run
 
 jobs:
   #
