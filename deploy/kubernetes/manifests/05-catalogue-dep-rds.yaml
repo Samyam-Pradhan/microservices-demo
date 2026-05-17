@@ -22,7 +22,6 @@ spec:
         command: ["/app"]
         args:
         - -port=80
-        - -DSN=catalogue_user:cataloguedb123@tcp(sock-shop-catalogue-db.crkum4ewsgqe.ap-south-1.rds.amazonaws.com:3306)/socksdb
         resources:
           limits:
             cpu: 200m
